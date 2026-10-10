@@ -26,6 +26,7 @@ bash wg.sh <命令> [参数]
 | `add` | `<名称>` | 新增客户端，自动分配 IP 和 PSK，打印配置文件和二维码 |
 | `del` / `rm` | `<名称>` | 删除客户端，热同步不断其他人 |
 | `show` / `qr` | `<名称>` | 再次打印某客户端的配置和二维码 |
+| `ros` | `<名称> [接口名]` | 生成 RouterOS 7 的 wireguard 接口 / peer / 地址三条命令，复制粘贴到 RouterOS 终端即可，接口名默认 `wg-vps` |
 | `list` / `ls` | 无 | 列出所有客户端：地址、最近握手时间、下行/上行流量 |
 | `status` | 无 | 服务状态、`wg show`、BBR/队列/转发参数、当前 nft 规则 |
 | `mtu` | `[数值]` | 不带参数重新探测，带参数手动设置，同步改服务端和所有客户端配置 |
@@ -42,7 +43,30 @@ bash wg.sh add phone
 bash wg.sh add laptop
 bash wg.sh list
 bash wg.sh show phone
+bash wg.sh add router && bash wg.sh ros router
 bash wg.sh del laptop
+```
+
+## 接入 RouterOS
+
+```bash
+bash wg.sh add router
+bash wg.sh ros router
+```
+
+输出三条命令，粘贴到 RouterOS 7 终端：
+
+```
+/interface/wireguard add name=wg-vps mtu=1420 private-key="..."
+/interface/wireguard/peers add interface=wg-vps public-key="..." preshared-key="..." endpoint-address=1.2.3.4 endpoint-port=51820 allowed-address=0.0.0.0/0 persistent-keepalive=25s
+/ip/address add address=10.8.0.2/24 interface=wg-vps
+```
+
+`allowed-address=0.0.0.0/0` 只是允许任意回包，RouterOS 不会因此自动加默认路由。要让内网设备走隧道，还需自行加 NAT、MSS 钳制和路由，例如：
+
+```
+/ip/firewall/nat add chain=srcnat out-interface=wg-vps action=masquerade
+/ip/firewall/mangle add chain=forward out-interface=wg-vps protocol=tcp tcp-flags=syn action=change-mss new-mss=clamp-to-pmtu passthrough=yes
 ```
 
 ## 安装参数

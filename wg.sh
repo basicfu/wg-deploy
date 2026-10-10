@@ -255,6 +255,22 @@ cmd_show() {
   command -v qrencode >/dev/null && qrencode -t ansiutf8 < "$CLIENTS_DIR/$name.conf"
 }
 
+# 把客户端 conf 翻译成 RouterOS 7 命令，接口名默认 wg-vps，可用第二个参数改
+cmd_ros() {
+  installed || die "尚未安装"
+  local name=${1:-} ifn=${2:-wg-vps} f
+  f=$CLIENTS_DIR/$name.conf; [[ -f $f ]] || die "用法: ros <名称> [RouterOS 接口名]"
+  local field; field() { sed -n "s/^$1 = //p" "$f" | head -1; }
+  local key pub psk ep addr mtu
+  key=$(field PrivateKey); pub=$(field PublicKey); psk=$(field PresharedKey)
+  ep=$(field Endpoint); addr=$(field Address); mtu=$(field MTU)
+  cat <<EOF
+/interface/wireguard add name=$ifn mtu=$mtu private-key="$key"
+/interface/wireguard/peers add interface=$ifn public-key="$pub" preshared-key="$psk" endpoint-address=${ep%:*} endpoint-port=${ep##*:} allowed-address=0.0.0.0/0 persistent-keepalive=25s
+/ip/address add address=$addr interface=$ifn
+EOF
+}
+
 cmd_list() {
   installed || die "尚未安装"
   local f name pub line
@@ -326,6 +342,7 @@ usage() {
   add <名称>         新增客户端，输出配置与二维码
   del <名称>         删除客户端
   show <名称>        再次显示客户端配置与二维码
+  ros <名称> [接口名]  生成 RouterOS 7 的 wireguard 接口/peer/地址命令，默认接口名 wg-vps
   list               列出客户端及握手/流量
   status             服务、wg、内核参数、nft 规则概览
   mtu [值]           探测或手动设置隧道 MTU
@@ -343,6 +360,7 @@ case ${1:-help} in
   add)       cmd_add "${2:-}" ;;
   del|rm)    cmd_del "${2:-}" ;;
   show|qr)   cmd_show "${2:-}" ;;
+  ros)       cmd_ros "${2:-}" "${3:-}" ;;
   list|ls)   cmd_list ;;
   status)    cmd_status ;;
   mtu)       cmd_mtu "${2:-}" ;;
