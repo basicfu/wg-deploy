@@ -68,9 +68,13 @@ EOF
 }
 
 # 独立 table，PostUp/PostDown 随接口生死，不碰 /etc/nftables.conf 里用户自己的规则。
+# 开头"声明-删除-重建"三行让文件可重复加载；不能放在 PostUp 里用 ";" 串联，
+# 因为 wg-quick 带 set -e，delete 不存在的表会直接中止整个钩子。
 # MSS 钳制是隧道内 TCP 不卡顿的关键，比单调 MTU 更稳。
 write_nft() {
   cat > "$NFT_FILE" <<EOF
+table inet wg
+delete table inet wg
 table inet wg {
   chain input {
     type filter hook input priority 0; policy accept;
@@ -98,7 +102,7 @@ Address = $WG_NET.1/24
 ListenPort = $WG_PORT
 PrivateKey = $(cat "$WG_DIR/server.key")
 MTU = $WG_MTU
-PostUp = nft delete table inet wg 2>/dev/null; nft -f $NFT_FILE
+PostUp = nft -f $NFT_FILE
 PostDown = nft delete table inet wg
 EOF
 }
@@ -273,7 +277,13 @@ cmd_mtu() {
   info "MTU 已设为 $new (已有客户端需重新导入配置)"
 }
 
-cmd_restart() { need_root; systemctl restart "wg-quick@$WG_IF"; wg show "$WG_IF"; }
+# nft 规则由参数推导，重启时顺手重渲染，脚本升级后不用手改服务器上的文件
+cmd_restart() {
+  need_root; installed || die "尚未安装"
+  write_nft
+  sed -i "s|^PostUp = .*|PostUp = nft -f $NFT_FILE|" "$SERVER_CONF"
+  systemctl restart "wg-quick@$WG_IF"; wg show "$WG_IF"
+}
 
 cmd_uninstall() {
   need_root
