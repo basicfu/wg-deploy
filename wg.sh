@@ -266,7 +266,7 @@ cmd_ros() {
   ep=$(field Endpoint); addr=$(field Address); mtu=$(field MTU)
   cat <<EOF
 /interface/wireguard add name=$ifn mtu=$mtu private-key="$key"
-/interface/wireguard/peers add interface=$ifn public-key="$pub" preshared-key="$psk" endpoint-address=${ep%:*} endpoint-port=${ep##*:} allowed-address=0.0.0.0/0 persistent-keepalive=25s
+/interface/wireguard/peers add interface=$ifn name=$name public-key="$pub" preshared-key="$psk" endpoint-address=${ep%:*} endpoint-port=${ep##*:} allowed-address=0.0.0.0/0 persistent-keepalive=25s
 /ip/address add address=$addr interface=$ifn
 EOF
 }

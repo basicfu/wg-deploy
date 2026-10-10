@@ -58,7 +58,7 @@ bash wg.sh ros router
 
 ```
 /interface/wireguard add name=wg-vps mtu=1420 private-key="..."
-/interface/wireguard/peers add interface=wg-vps public-key="..." preshared-key="..." endpoint-address=1.2.3.4 endpoint-port=51820 allowed-address=0.0.0.0/0 persistent-keepalive=25s
+/interface/wireguard/peers add interface=wg-vps name=router public-key="..." preshared-key="..." endpoint-address=1.2.3.4 endpoint-port=51820 allowed-address=0.0.0.0/0 persistent-keepalive=25s
 /ip/address add address=10.8.0.2/24 interface=wg-vps
 ```
 
