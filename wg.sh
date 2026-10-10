@@ -7,12 +7,12 @@ WG_DIR=/etc/wireguard
 CONF=$WG_DIR/wg-manage.conf
 CLIENTS_DIR=$WG_DIR/clients
 
-# 默认参数。install 时固化到 $CONF，之后所有子命令以 $CONF 为准，
-# 这样换 shell/重启后 add/del 仍能算出正确网段和端口。
+# 默认参数。install 时交互确认后固化到 $CONF，之后所有子命令以 $CONF 为准，
+# 这样换 shell/重启后 add/del 仍能算出正确网段和端口。环境变量可作为交互的预填值。
 WG_IF=${WG_IF:-wg0}
 WG_PORT=${WG_PORT:-51820}
 WG_NET=${WG_NET:-10.8.0}      # /24，服务端固定占 .1
-WG_DNS=${WG_DNS:-1.1.1.1}
+WG_DNS=${WG_DNS:-8.8.8.8}
 WG_MTU=${WG_MTU:-}            # 留空由 install 探测
 ENDPOINT=${ENDPOINT:-}        # 留空自动取公网 IPv4
 OUT_IF=${OUT_IF:-}            # 留空取默认路由网卡
@@ -26,6 +26,18 @@ die()       { echo "错误: $*" >&2; exit 1; }
 info()      { echo -e "\e[32m==>\e[0m $*"; }
 need_root() { [[ $EUID -eq 0 ]] || die "请用 root 运行"; }
 installed() { [[ -f $SERVER_CONF && -f $CONF ]]; }
+
+# 从 /dev/tty 读，保证 curl | bash 方式也能交互；没有终端就全用默认值
+ask() {
+  local _var=$1 _prompt=$2 _def=$3 _re=${4:-} _v
+  while :; do
+    if [[ -r /dev/tty ]]; then read -rp "$_prompt [${_def:-自动}]: " _v </dev/tty; else _v=; fi
+    _v=${_v:-$_def}
+    [[ -z $_re || -z $_v || $_v =~ $_re ]] && break
+    echo "  格式不对，请重输"
+  done
+  printf -v "$_var" '%s' "$_v"
+}
 
 detect_out_if() { ip -4 route show default | awk '{print $5; exit}'; }
 detect_endpoint() {
@@ -139,14 +151,24 @@ cmd_install() {
   apt-get update -qq
   apt-get install -y -qq wireguard nftables qrencode curl iproute2 >/dev/null
 
-  OUT_IF=${OUT_IF:-$(detect_out_if)}
-  ENDPOINT=${ENDPOINT:-$(detect_endpoint)}
-  [[ -n $OUT_IF && -n $ENDPOINT ]] || die "无法探测出口网卡或公网 IP，请通过 OUT_IF=/ENDPOINT= 指定"
+  info "请确认参数，直接回车使用 [] 内默认值"
+  ask WG_IF    "接口名"               "$WG_IF"    '^[A-Za-z0-9_-]+$'
+  ask WG_PORT  "UDP 监听端口"         "$WG_PORT"  '^[0-9]{1,5}$'
+  ask WG_NET   "内网网段前缀 (/24)"   "$WG_NET"   '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'
+  ask WG_DNS   "下发给客户端的 DNS"   "$WG_DNS"
+  ask ENDPOINT "公网 IP 或域名"       "${ENDPOINT:-$(detect_endpoint)}"
+  ask OUT_IF   "NAT 出口网卡"         "${OUT_IF:-$(detect_out_if)}"
+  ask WG_MTU   "隧道 MTU (空=自动探测)" "$WG_MTU"   '^[0-9]{4}$'
+  (( WG_PORT >= 1 && WG_PORT <= 65535 )) || die "端口超出范围"
+  [[ -n $OUT_IF && -n $ENDPOINT ]] || die "出口网卡和公网地址不能为空"
+  SERVER_CONF=$WG_DIR/$WG_IF.conf; NFT_FILE=$WG_DIR/$WG_IF.nft
+  [[ -f $SERVER_CONF ]] && die "$SERVER_CONF 已存在"
   if [[ -z $WG_MTU ]]; then
     info "探测路径 MTU"
     WG_MTU=$(probe_mtu)
   fi
-  info "出口网卡=$OUT_IF 公网地址=$ENDPOINT 端口=$WG_PORT 网段=$WG_NET.0/24 MTU=$WG_MTU"
+  echo
+  info "接口=$WG_IF 端口=$WG_PORT 网段=$WG_NET.0/24 DNS=$WG_DNS 公网地址=$ENDPOINT 出口网卡=$OUT_IF MTU=$WG_MTU"
 
   info "生成服务端密钥"
   mkdir -p "$CLIENTS_DIR"; chmod 700 "$WG_DIR" "$CLIENTS_DIR"
@@ -300,7 +322,7 @@ usage() {
   cat <<EOF
 用法: bash $0 <命令> [参数]
 
-  install            一键安装: 装包/密钥/转发/nftables/BBR 调优/MTU 探测/启动
+  install            一键安装，交互确认端口/网段/DNS 等参数，回车用默认值
   add <名称>         新增客户端，输出配置与二维码
   del <名称>         删除客户端
   show <名称>        再次显示客户端配置与二维码
@@ -311,8 +333,8 @@ usage() {
   restart            重启 $WG_IF
   uninstall          卸载并清理
 
-安装前可用环境变量覆盖默认值:
-  WG_PORT=51820 WG_NET=10.8.0 WG_DNS=1.1.1.1 WG_MTU= ENDPOINT= OUT_IF= bash $0 install
+环境变量可作为交互预填值 (无终端时直接生效):
+  WG_PORT=51820 WG_NET=10.8.0 WG_DNS=8.8.8.8 WG_MTU= ENDPOINT= OUT_IF= bash $0 install
 EOF
 }
 
